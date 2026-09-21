@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: false
+minimumReleaseAgeExclude:
+  - '@adaptcom/cli@0.4.2'
+  - '@adaptcom/core@0.4.2'

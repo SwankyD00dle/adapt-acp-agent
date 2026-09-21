@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "paths": {
+      "@adaptcom/core": ["../../packages/core/src/index.ts"]
+    },
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": [
+    "agent/**/*.ts",
+    "agent/**/*.mts",
+    "adapt.runtime.ts",
+    "adapt.runtime.mts",
+    "adapt.deploy.ts",
+    "adapt.deploy.mts",
+    "settings.ts",
+    "protocol.ts",
+    "client/**/*.ts",
+    "client/**/*.mts"
+  ]
+}

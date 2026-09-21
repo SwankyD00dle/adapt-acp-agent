@@ -1,0 +1,30 @@
+# Dependencies and package-manager cache
+node_modules/
+.pnpm-store/
+
+# Local environment files (keep the example template)
+.env
+.env.*
+!.env.example
+
+# Build output and caches
+dist/
+build/
+/client/generated/
+*.tsbuildinfo
+.cache/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
