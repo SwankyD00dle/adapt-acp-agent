@@ -27,7 +27,7 @@ export default defineAgent({
           baseURL: process.env.PLATINUM_URL,
         })(required("PLATINUM_MODEL")),
         maxSteps: 30,
-        timeoutMs: 600_000,
+        timeoutMs: 15 * 60_000,
       }),
     ),
   channels: ({ connections, secrets }) => [

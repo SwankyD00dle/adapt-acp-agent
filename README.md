@@ -48,35 +48,31 @@ writeFileSync(`${homedir()}/.config/adapt/acp-code.token`, randomBytes(32).toStr
 chmod 600 "$HOME/.config/adapt/acp-code.token"
 ```
 
-Export the CLI's Adapt credentials using your existing credential workflow:
-`PLATINUM_AUTH_TOKEN`, and optionally `PLATINUM_URL`. Use the same target endpoint
-for vault creation and deployment. Then create the two vaults, or reuse existing
-ones with these fields:
+Export your Adapt credentials using your existing credential workflow:
+`PLATINUM_AUTH_TOKEN`, and optionally `PLATINUM_URL`. The token must be authorized
+for both deployment and model access. Export the dedicated client token too:
 
 ```sh
-pnpm adapt vault create acp-code-model --env PLATINUM_AUTH_TOKEN
 export ACP_TOKEN="$(cat "$HOME/.config/adapt/acp-code.token")"
-pnpm adapt vault create acp-code-client --env ACP_TOKEN
-unset ACP_TOKEN
 ```
 
-The model vault must contain a token authorized for model access. If it differs
-from the CLI token, use a dedicated file with `--env-file`, as described in the
-[vault guide](../../docs/vaults.md). Do not give Patchbay the model/management token.
-Only the separate ACP token belongs in the local token file.
+Do not give Patchbay the model/management token. Only the separate ACP token
+belongs in the local token file.
 
-Set in `examples/acp-code/.env`:
+Set in the project's `.env` or export in your shell:
 
 ```dotenv
 PLATINUM_MODEL=<a-model-route-available-to-your-account>
-MODEL_VAULT=acp-code-model
-ACP_VAULT=acp-code-client
 SANDBOX_TTL_SECONDS=0
 ```
 
-Also set `PLATINUM_AUTH_TOKEN` and optional `PLATINUM_URL` there if they are not
-already exported. Keep `.env` out of Git. `ACP_TOKEN` in `.env` is only needed for
-local serving; the deployed worker resolves it from `ACP_VAULT`.
+Also set `PLATINUM_AUTH_TOKEN`, `ACP_TOKEN`, and optional `PLATINUM_URL` there if
+they are not already exported. Keep `.env` out of Git. Both local serving and
+deployment use these environment variables; no vault setup is required.
+`adapt.deploy.ts` explicitly forwards both tokens to the worker environment,
+and `adapt.runtime.ts` resolves them from that environment. Treat deployment
+environment configuration as sensitive, and redeploy after changing either token.
+The deployed `ACP_TOKEN` must match the raw token in Patchbay's local token file.
 
 ```sh
 pnpm --filter acp-code run deploy --environment staging
@@ -378,7 +374,7 @@ pnpm adapt stop examples/acp-code --environment staging
 
 The bridge uses `X-ACP-Token` to work around the current Platinum/orc proxy
 collision between guest `Authorization` and internal proxy credentials. For 401 errors, check that the local token file matches
-the deployed ACP vault;
+the deployed worker's `ACP_TOKEN` environment variable;
 redeploy after rotating it. For 404, check the public base URL and retained ingress
 path, and ensure `/acp` was not appended twice. For "module not found," rerun
 `pnpm install --frozen-lockfile`. For an expired session, create a new one instead

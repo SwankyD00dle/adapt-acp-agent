@@ -1,5 +1,4 @@
 import {
-  adaptVaultSecret,
   createAdaptDeploymentTarget,
   defineDeployment,
 } from "@adaptcom/core";
@@ -20,14 +19,9 @@ export default defineDeployment({
         ttlSeconds: Number(process.env.SANDBOX_TTL_SECONDS ?? 0),
         memoryMiB: Number(process.env.SANDBOX_MEMORY_MIB ?? 1024),
         ...(volume ? { volume } : {}),
-        secretBindings: {
-          "model.apiKey": adaptVaultSecret(
-            required("MODEL_VAULT"),
-            "PLATINUM_AUTH_TOKEN",
-          ),
-          "acp.token": adaptVaultSecret(required("ACP_VAULT"), "ACP_TOKEN"),
-        },
         env: () => ({
+          PLATINUM_AUTH_TOKEN: required("PLATINUM_AUTH_TOKEN"),
+          ACP_TOKEN: required("ACP_TOKEN"),
           PLATINUM_MODEL: required("PLATINUM_MODEL"),
           ...(process.env.PLATINUM_URL
             ? { PLATINUM_URL: process.env.PLATINUM_URL }

@@ -28,3 +28,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# IDE and editor settings (keep shared Biome configuration)
+.vscode/*
