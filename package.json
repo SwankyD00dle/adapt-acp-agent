@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "pnpm adapt build --service",
     "format": "biome format --write .",
     "lint": "biome lint .",
     "test": "echo \"Error: no test specified\" && exit 1"

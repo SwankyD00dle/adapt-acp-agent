@@ -13,6 +13,7 @@ build/
 /client/generated/
 *.tsbuildinfo
 .cache/
+.adapt/
 
 # Test coverage
 coverage/
