@@ -216,6 +216,9 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^1.4.0
         version: 1.4.0(zod@4.6.5)
+      ai:
+        specifier: 7.0.97
+        version: 7.0.97(zod@4.6.5)
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -658,6 +661,13 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.6.0
 
+  '@ai-sdk/gateway@4.0.78(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.13
+      '@ai-sdk/provider-utils': 5.0.39(zod@4.6.5)
+      '@vercel/oidc': 3.2.0
+      zod: 4.6.5
+
   '@ai-sdk/openai@4.0.65(zod@4.6.0)':
     dependencies:
       '@ai-sdk/provider': 4.0.13
@@ -672,6 +682,15 @@ snapshots:
       eventsource-parser: 3.1.1
       undici: 7.29.1
       zod: 4.6.0
+
+  '@ai-sdk/provider-utils@5.0.39(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.13
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.1
+      undici: 7.29.1
+      zod: 4.6.5
 
   '@ai-sdk/provider@4.0.13':
     dependencies:
@@ -851,6 +870,13 @@ snapshots:
       '@ai-sdk/provider': 4.0.13
       '@ai-sdk/provider-utils': 5.0.39(zod@4.6.0)
       zod: 4.6.0
+
+  ai@7.0.97(zod@4.6.5):
+    dependencies:
+      '@ai-sdk/gateway': 4.0.78(zod@4.6.5)
+      '@ai-sdk/provider': 4.0.13
+      '@ai-sdk/provider-utils': 5.0.39(zod@4.6.5)
+      zod: 4.6.5
 
   cross-spawn@7.0.6:
     dependencies:

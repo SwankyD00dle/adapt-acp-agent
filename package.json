@@ -24,6 +24,7 @@
     "@adaptcom/cli": "latest",
     "@adaptcom/core": "latest",
     "@agentclientprotocol/sdk": "^1.4.0",
+    "ai": "7.0.97",
     "zod": "^4.6.5"
   },
   "devDependencies": {
