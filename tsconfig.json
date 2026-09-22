@@ -12,9 +12,6 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["node"],
-    "paths": {
-      "@adaptcom/core": ["../../packages/core/src/index.ts"]
-    },
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
@@ -28,6 +25,8 @@
     "settings.ts",
     "protocol.ts",
     "client/**/*.ts",
-    "client/**/*.mts"
+    "client/**/*.mts",
+    "diagnostics.ts",
+    "tests/**/*.mts"
   ]
 }

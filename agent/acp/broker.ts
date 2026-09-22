@@ -1,5 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { BridgeEvent, ClientResult, Operation } from "../../protocol.ts";
+import { type DiagnosticLogger, logDiagnostic } from "../../diagnostics.ts";
+import {
+  type BridgeEvent,
+  type ClientResult,
+  type Operation,
+  editorLeaseMs,
+  operationSchema,
+} from "../../protocol.ts";
+import { BridgeStateError } from "./errors.ts";
 
 type Turn = {
   id: string;
@@ -10,6 +18,9 @@ type Attachment = {
   id: string;
   cwd: string;
   sequence: number;
+  lastPollAt: number | undefined;
+  lastCursor: number;
+  openedAt: number;
   events: { sequence: number; event: BridgeEvent }[];
   seen: Map<string, string>;
   cancelled: Set<string>;
@@ -25,9 +36,15 @@ export class IdeBroker {
   private attachment: Attachment | undefined;
   private readonly leaseMs: number;
   private readonly turnMs: number;
-  constructor(leaseMs = 45_000, turnMs = 15 * 60_000) {
+  private readonly log: DiagnosticLogger;
+  constructor(
+    leaseMs = editorLeaseMs,
+    turnMs = 15 * 60_000,
+    log: DiagnosticLogger = logDiagnostic,
+  ) {
     this.leaseMs = leaseMs;
     this.turnMs = turnMs;
+    this.log = log;
   }
 
   attach(cwd: string, signal: AbortSignal) {
@@ -37,21 +54,31 @@ export class IdeBroker {
         "An editor is already attached. Close it or wait for its lease to expire.",
       );
     const attachmentId = randomUUID();
-    const aborted = () => this.detach(attachmentId);
+    const aborted = () => this.detach(attachmentId, "host_aborted");
     signal.addEventListener("abort", aborted, { once: true });
     this.attachment = {
       id: attachmentId,
       cwd,
       sequence: 0,
+      lastPollAt: undefined,
+      lastCursor: 0,
+      openedAt: performance.now(),
       events: [],
       seen: new Map(),
       cancelled: new Set(),
       turn: undefined,
       pending: new Map(),
       completedCalls: new Set(),
-      lease: setTimeout(aborted, this.leaseMs).unref(),
+      lease: setTimeout(
+        () => this.detach(attachmentId, "lease_expired"),
+        this.leaseMs,
+      ).unref(),
       unlisten: () => signal.removeEventListener("abort", aborted),
     };
+    this.log("acp.attachment.opened", {
+      sessionId: attachmentId,
+      leaseMs: this.leaseMs,
+    });
     return { attachmentId };
   }
 
@@ -62,7 +89,8 @@ export class IdeBroker {
   private attached(id: string) {
     const attachment = this.attachment;
     if (!attachment || attachment.id !== id)
-      throw new Error(
+      throw new BridgeStateError(
+        "ATTACHMENT_EXPIRED",
         "Editor attachment expired. Reconnect after inspecting the workspace.",
       );
     return attachment;
@@ -79,10 +107,13 @@ export class IdeBroker {
       after > attachment.sequence ||
       after < (attachment.events[0]?.sequence ?? 1) - 1
     )
-      throw new Error(
+      throw new BridgeStateError(
+        "CURSOR_EXPIRED",
         "Event cursor expired. Reconnect; operations will not be replayed.",
       );
     attachment.lease.refresh();
+    attachment.lastPollAt = performance.now();
+    attachment.lastCursor = after;
     const events = attachment.events
       .filter((event) => event.sequence > after)
       .slice(0, 32);
@@ -127,7 +158,11 @@ export class IdeBroker {
     const attachment = this.attached(id);
     if (attachment.completedCalls.has(callId)) return;
     const pending = attachment.pending.get(callId);
-    if (!pending) throw new Error("Tool request is no longer pending.");
+    if (!pending)
+      throw new BridgeStateError(
+        "TOOL_NOT_PENDING",
+        "Tool request is no longer pending.",
+      );
     attachment.completedCalls.add(callId);
     pending(result);
   }
@@ -158,14 +193,30 @@ export class IdeBroker {
     }
   }
 
-  detach(id: string) {
+  detach(
+    id: string,
+    reason: "client_close" | "lease_expired" | "host_aborted" = "client_close",
+  ) {
     const attachment = this.attachment;
     if (!attachment || attachment.id !== id) return;
+    this.log("acp.attachment.detached", {
+      sessionId: id,
+      reason,
+      promptId: attachment.turn?.id,
+      lastPollAgeMs:
+        attachment.lastPollAt === undefined
+          ? null
+          : Math.round(performance.now() - attachment.lastPollAt),
+      attachmentAgeMs: Math.round(performance.now() - attachment.openedAt),
+      lastCursor: attachment.lastCursor,
+      sequence: attachment.sequence,
+      pendingCallCount: attachment.pending.size,
+    });
     clearTimeout(attachment.lease);
     attachment.unlisten();
     if (attachment.turn) clearTimeout(attachment.turn.deadline);
     attachment.turn?.controller.abort(
-      new Error("Editor disconnected or its lease expired."),
+      new Error(`Editor attachment closed: ${reason}.`),
     );
     this.attachment = undefined;
   }
@@ -208,6 +259,8 @@ export class IdeBroker {
     operationSignal: AbortSignal,
   ) {
     operationSignal.throwIfAborted();
+    // Reject invalid tools before publishing, never poison the client's poll page.
+    operation = operationSchema.parse(operation);
     const attachment = this.attached(id);
     const turn = attachment.turn;
     if (!turn) throw new Error("No active editor turn.");

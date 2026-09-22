@@ -30,10 +30,7 @@ export function formatOperationError(error: unknown) {
   const { codes, messages } = errorDiagnostics(error);
   const code = codes.length ? ` [${[...new Set(codes)].join(", ")}]` : "";
   const [message = "Operation stopped.", ...details] = messages;
-  return `${message}${code}${details.length ? `: ${details.join(": ")}` : ""}`.slice(
-    0,
-    4096,
-  );
+  return `${message}${code}${details.length ? `: ${details.join(": ")}` : ""}`;
 }
 
 export function isFileNotFound(error: unknown) {

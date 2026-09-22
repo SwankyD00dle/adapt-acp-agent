@@ -221,9 +221,16 @@ test only. Do not use `adapt dev --ui` or terminal chat for this example: its to
 - One active prompt per client process. The underlying channel host also queues
   turns serially across attachments. Maximum eight live attachments and 128 prompts
   per attachment; close and create a new attachment as needed.
-- Polling is every 250 ms during a turn and one second while idle. A disconnected
-  client loses its lease after 45 seconds. A 15-minute acceptance-to-completion
-  watchdog prevents permanently busy turns, including failures outside the
+- Polling is every 250 ms during a turn and one second while idle. Network errors,
+  request timeouts, and HTTP 408/429/500/502/503/504 responses retry the same poll
+  cursor with bounded backoff. Recovery ends 40 seconds after the last successful
+  poll's send time, before the 45-second editor lease expires. Authentication,
+  attachment/cursor conflicts, and malformed successful responses fail immediately.
+  Only polls are retried: prompts, commands, writes, and tool results are never
+  automatically replayed. Close/cancel are coordinated and idempotent; a failed
+  cancellation closes the attachment instead of leaving an orphaned remote turn.
+  A disconnected client loses its lease after 45 seconds. A 15-minute
+  acceptance-to-completion watchdog prevents permanently busy turns, including failures outside the
   harness wrapper. Commands have an independent maximum 60-second timeout,
   starting before terminal creation is dispatched, after the bridge's approval.
   Creation delays count toward that deadline. Late-created terminals are cleaned
@@ -233,8 +240,12 @@ test only. Do not use `adapt dev --ui` or terminal chat for this example: its to
   a wait for the root process to exit within the same deadline; release is
   attempted even if either fails. This does not prove that detached descendants
   stopped, so do not use these tools for background jobs.
-- At most 32,000 prompt/context characters, 64 KB file reads, 32 KB terminal
-  output, and 30 agent steps per turn. Terminal output combines stdout/stderr;
+- Tool input schemas and bridge event schemas share validation. ACP strings
+  (commands, paths, prompts, contents, and error/result text) have no bridge-only
+  maximum length. File reads retain a 64 KB resource budget, terminal output a
+  32 KB budget, and agent turns a 30-step budget; these are not wire validation
+  limits. The underlying service host still enforces its own HTTP request-body
+  budget (1 MB in `@adaptcom/core` 0.4.2). Terminal output combines stdout/stderr;
   stdin, interactive commands, and background-process management are unsupported.
 - No token-by-token streaming, predictive Tab completion, MCP forwarding, images,
   automatic diagnostics subscription, saved-session list/load/resume/fork,
@@ -337,35 +348,28 @@ and safe execution also require a capable editor client and host environment.
 ## Verify and operate
 
 ```sh
-pnpm check
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm lint
 pnpm format:check
-pnpm --filter acp-code typecheck
-pnpm --filter acp-code test
-pnpm --filter acp-code build
+pnpm build
+pnpm test
 ```
 
-The example suite checks authenticated prompt dispatch, token rotation, duplicate
-delivery handling, credential-error redaction, and cancellation during authentication.
-It does not launch the Patchbay UI, provision a cloud deployment, or cover full
-workspace tool execution or standalone service/client startup.
-The repository's existing CI only runs `tests/`; run the explicit example commands
-above too. The example's root `tsconfig.json` checks the agent, deployment/runtime
-configuration, protocol, client, and tests. Its only repository-specific path is
-the `@adaptcom/core` source alias, matching the other examples.
+The regression suite checks shared validation, lease behavior, retry budgets,
+request/detach diagnostics, cancellation races, and the downloadable client over
+real loopback HTTP and ACP stdio. Editor terminals are mocked; tests do not run
+workspace commands, launch the Patchbay UI, or provision a cloud deployment.
+`tsconfig.json` checks the agent, deployment/runtime configuration, protocol,
+client, and tests against the installed `@adaptcom/core` package.
 
-Use the example's `build`/`deploy`/`serve` scripts: they regenerate
-`client/generated/bundle.js` before embedding it in the service artifact. A direct
-`pnpm adapt build/deploy examples/acp-code` does **not** run that step and can embed
-a stale client (or fail on a clean checkout). If using the CLI directly, first run
-`pnpm --filter acp-code build:client`. No client compilation occurs on the host.
+Use `pnpm build` to regenerate `client/generated/bundle.js` before embedding it
+in the service artifact. Calling `pnpm adapt build` or `pnpm adapt deploy`
+directly does not invoke that script: run `pnpm build:client` first to avoid
+embedding a stale client. No client compilation occurs on the deployment host.
 The checked-in `client/generated/bundle.d.ts` declares the generated module's
-export, so typechecking does not require a client build or an `.adapt` directory.
-The declaration is not a runtime fallback: build/deploy must still generate the
-JavaScript module.
-These scripts invoke the locally installed `adapt` CLI from the example directory;
-they also work with `pnpm build`, `pnpm run deploy`, and `pnpm serve` from that directory.
-For source development only, `node examples/acp-code/client/main.mts ...` still
-works from an installed checkout.
+export. For source development, `node client/main.mts ...` works from an
+installed checkout.
 
 ```sh
 pnpm adapt logs examples/acp-code --environment staging --follow
@@ -380,3 +384,29 @@ path, and ensure `/acp` was not appended twice. For "module not found," rerun
 `pnpm install --frozen-lockfile`. For an expired session, create a new one instead
 of replaying tools. If an edit/command outcome is unknown, inspect the workspace and
 running processes before reconnecting.
+
+### Disconnect diagnostics
+
+Client JSON diagnostics go to **stderr**, never the ACP stdout stream. The server
+also emits JSON diagnostics. They contain identifiers, statuses, timing, and
+error/schema codes, not tokens, prompts, commands, file contents, or raw error
+messages/data. Capture the first failure, not just the dispatch's final error:
+
+- `acp.client.request_failed`: HTTP action, status, session/prompt/call ID,
+  transport phase, error type/code, and remote error code when available.
+- `acp.client.poll_retry`, `poll_recovered`, `poll_exhausted`: attempts and the
+  last successful poll's age.
+- `acp.client.failure`: initiating failure phase (`poll`, `editor_update`,
+  `result_upload`, or `cancel`) and schema issue paths/codes when relevant.
+- `acp.client.close`: cleanup reason and last-poll age.
+- `acp.bridge.request`: server-side action, session/prompt/call ID, status, duration,
+  and error code. Distinguishes a failing poll from a harmless cleanup request.
+- `acp.attachment.detached`: `client_close`, `lease_expired`, or `host_aborted`,
+  last-poll age (`null` if no poll succeeded), attachment age, cursor/sequence,
+  active prompt ID, and pending callback count.
+
+`pnpm build` rebuilds the checked-in downloadable client before building the
+service. After deploying, **restart the Patchbay agent** to download that client;
+a running client does not update itself. Regression tests cover the shipped
+bundle as well as the source schemas, broker, and HTTP retry logic. They use
+loopback HTTP and fake editor terminals, with no real commands or cloud deployment.

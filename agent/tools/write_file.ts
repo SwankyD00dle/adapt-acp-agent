@@ -1,7 +1,6 @@
 import type { AgentProjectContext, ToolContext } from "@adaptcom/core";
 import { type ToolExecutionOptions, tool } from "ai";
-import { z } from "zod";
-import { filePathSchema } from "../../protocol.ts";
+import { writeInputSchema } from "../../protocol.ts";
 import type { AcpAccess } from "../types.ts";
 
 export default function writeFile({ connections }: AgentProjectContext) {
@@ -9,10 +8,7 @@ export default function writeFile({ connections }: AgentProjectContext) {
   return tool({
     description:
       "Write a UTF-8 file, replacing its contents and creating parent directories. Relative paths start in the working directory.",
-    inputSchema: z.object({
-      path: filePathSchema,
-      contents: z.string(),
-    }),
+    inputSchema: writeInputSchema,
     async execute(
       { path, contents },
       { context }: ToolExecutionOptions<ToolContext>,

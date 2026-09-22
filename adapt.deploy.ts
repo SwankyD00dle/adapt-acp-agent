@@ -1,7 +1,4 @@
-import {
-  createAdaptDeploymentTarget,
-  defineDeployment,
-} from "@adaptcom/core";
+import { createAdaptDeploymentTarget, defineDeployment } from "@adaptcom/core";
 import { required } from "./settings.ts";
 
 export default defineDeployment({

@@ -1,10 +1,13 @@
 import type { AgentConnection } from "@adaptcom/core";
 import type { AcpAccess } from "../types.ts";
+import type { DiagnosticLogger } from "../../diagnostics.ts";
+import { BridgeStateError } from "./errors.ts";
 import { IdeBroker } from "./broker.ts";
 
 interface AcpConnectionOptions {
   leaseMs?: number;
   turnMs?: number;
+  log?: DiagnosticLogger;
 }
 
 /** Installation-scoped live editor access; no credentials or saved history. */
@@ -20,7 +23,8 @@ export function createAcpConnection(
     prune();
     const broker = attachments.get(id);
     if (!broker)
-      throw new Error(
+      throw new BridgeStateError(
+        "ATTACHMENT_EXPIRED",
         "Editor attachment expired. Reconnect after inspecting the workspace.",
       );
     return broker;
@@ -36,7 +40,11 @@ export function createAcpConnection(
           prune();
           if (attachments.size >= 8)
             throw new Error("Eight workspaces are already attached.");
-          const broker = new IdeBroker(options.leaseMs, options.turnMs);
+          const broker = new IdeBroker(
+            options.leaseMs,
+            options.turnMs,
+            options.log,
+          );
           const { attachmentId } = broker.attach(cwd, signal);
           attachments.set(attachmentId, broker);
           return { attachmentId };
@@ -57,7 +65,9 @@ export function createAcpConnection(
         },
         cancel(id, promptId) {
           check();
-          attached(id).cancel(id, promptId);
+          prune();
+          // Cancellation after close/lease expiry is already satisfied.
+          attachments.get(id)?.cancel(id, promptId);
         },
         close(id) {
           check();

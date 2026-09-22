@@ -4,13 +4,10 @@ import { isAbsolute } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import * as acp from "@agentclientprotocol/sdk";
-import {
-  type BridgeRequest,
-  type ClientResult,
-  openedSchema,
-  pollSchema,
-} from "../protocol.ts";
+import { type ClientResult, openedSchema } from "../protocol.ts";
+import { errorMetadata, logDiagnostic } from "../diagnostics.ts";
 import { formatOperationError } from "./errors.mts";
+import { createTransport, type TransportOptions } from "./transport.mts";
 import type { ApprovalMode } from "./types.ts";
 import { Workspace } from "./workspace.mts";
 
@@ -19,6 +16,7 @@ type Turn = {
   controller: AbortController;
   submitted: boolean;
   remoteDone: boolean;
+  cancelling?: Promise<void>;
   complete: (response: acp.PromptResponse) => void;
   fail: (error: unknown) => void;
 };
@@ -28,6 +26,7 @@ type Attachment = {
   attachmentId: string;
   workspace: Workspace;
   cursor: number;
+  lastPollAt: number;
   controller: AbortController;
   turn: Turn | undefined;
   closing?: Promise<void>;
@@ -37,6 +36,7 @@ export function createBridge(
   endpoint: string,
   token: string,
   approvalMode: ApprovalMode = "ask",
+  options: TransportOptions = {},
 ) {
   const url = new URL(endpoint);
   if (url.username || url.password || url.search || url.hash)
@@ -66,29 +66,9 @@ export function createBridge(
         "Local operation outcome unknown. Inspect the workspace and running commands before restarting this bridge.",
       );
   };
-  const request = async (body: BridgeRequest, signal?: AbortSignal) => {
-    const response = await fetch(url, {
-      method: "POST",
-      redirect: "error",
-      headers: {
-        "x-acp-token": token,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.any([
-        AbortSignal.timeout(10_000),
-        ...(signal ? [signal] : []),
-      ]),
-    });
-    const result: unknown = await response.json();
-    if (!response.ok) {
-      const message = `Remote bridge HTTP ${response.status}: ${typeof result === "object" && result !== null && "error" in result ? String(result.error) : "request failed"}`;
-      throw response.status === 401
-        ? acp.RequestError.authRequired(undefined, message)
-        : bridgeError(message);
-    }
-    return result;
-  };
+  const log = options.log ?? logDiagnostic;
+  const transport = createTransport(url, token, options);
+  const request = transport.request;
   const settle = async (attachment: Attachment) => {
     try {
       await attachment.workspace.settle();
@@ -97,10 +77,19 @@ export function createBridge(
       ready();
     }
   };
-  const closeAttachment = (id: string): Promise<void> => {
+  const closeAttachment = (
+    id: string,
+    reason = "editor_close",
+  ): Promise<void> => {
     const attachment = attachments.get(id);
     if (!attachment) return Promise.resolve();
     attachment.closing ??= (async () => {
+      log("acp.client.close", {
+        sessionId: id,
+        promptId: attachment.turn?.id,
+        reason,
+        lastPollAgeMs: Math.round(performance.now() - attachment.lastPollAt),
+      });
       attachment.controller.abort(new Error("Attachment disconnected."));
       attachment.turn?.controller.abort(new Error("Attachment disconnected."));
       attachment.turn?.fail(
@@ -108,6 +97,9 @@ export function createBridge(
           "Editor disconnected; inspect the workspace before creating a new session.",
         ),
       );
+      // Join cancellation already on the wire before sending close. Prompt cleanup
+      // sees `closing` and never starts another cancellation.
+      await attachment.turn?.cancelling;
       await settle(attachment).catch(() => {});
       await request({
         action: "close",
@@ -119,26 +111,45 @@ export function createBridge(
   };
   const cancel = async (attachment: Attachment, turn: Turn) => {
     turn.controller.abort(new Error("Cancelled by the editor."));
-    if (turn.submitted && !turn.remoteDone)
-      await request({
-        action: "cancel",
-        sessionId: attachment.attachmentId,
-        promptId: turn.id,
-      }).catch(turn.fail);
+    if (attachment.closing || !turn.submitted || turn.remoteDone) return;
+    turn.cancelling ??= request({
+      action: "cancel",
+      sessionId: attachment.attachmentId,
+      promptId: turn.id,
+    }).then(
+      () => {},
+      (error: unknown) => {
+        if (!attachment.closing) {
+          log("acp.client.failure", {
+            sessionId: attachment.attachmentId,
+            promptId: turn.id,
+            phase: "cancel",
+            ...errorMetadata(error),
+          });
+          turn.fail(error);
+          // Do not await: close joins this cancellation promise.
+          void closeAttachment(attachment.attachmentId, "cancel_failed");
+        }
+      },
+    );
+    await turn.cancelling;
   };
   const poll = async (id: string, attachment: Attachment) => {
+    let phase = "poll";
     try {
       while (!attachment.controller.signal.aborted) {
-        const page = pollSchema.parse(
-          await request(
-            {
-              action: "poll",
-              sessionId: attachment.attachmentId,
-              after: attachment.cursor,
-            },
-            attachment.controller.signal,
-          ),
+        phase = "poll";
+        const { page, sentAt } = await transport.poll(
+          {
+            action: "poll",
+            sessionId: attachment.attachmentId,
+            after: attachment.cursor,
+          },
+          attachment.controller.signal,
+          attachment.lastPollAt,
         );
+        attachment.lastPollAt = sentAt;
+        phase = "editor_update";
         for (const { sequence, event } of page.events) {
           attachment.cursor = sequence;
           if (event.type === "message")
@@ -191,8 +202,15 @@ export function createBridge(
               .catch((error: unknown) => {
                 if (attachment.turn !== turn || turn.controller.signal.aborted)
                   return;
+                log("acp.client.failure", {
+                  sessionId: id,
+                  promptId: turn.id,
+                  callId: event.callId,
+                  phase: "result_upload",
+                  ...errorMetadata(error),
+                });
                 turn.fail(error);
-                void closeAttachment(id);
+                void closeAttachment(id, "result_upload_failed");
               });
           }
         }
@@ -202,8 +220,16 @@ export function createBridge(
       }
     } catch (error) {
       if (!attachment.controller.signal.aborted) {
+        log("acp.client.failure", {
+          sessionId: id,
+          promptId: attachment.turn?.id,
+          phase,
+          lastPollAgeMs: Math.round(performance.now() - attachment.lastPollAt),
+          ...errorMetadata(error),
+        });
         attachment.turn?.fail(error);
-        await attachment.workspace
+        // A stalled notification must not prevent local cleanup or server close.
+        void attachment.workspace
           .update({
             sessionUpdate: "agent_message_chunk",
             content: {
@@ -212,7 +238,7 @@ export function createBridge(
             },
           })
           .catch(() => {});
-        await closeAttachment(id);
+        await closeAttachment(id, `${phase}_failed`);
       }
     }
   };
@@ -238,6 +264,7 @@ export function createBridge(
         throw bridgeError("Open an absolute workspace directory in Patchbay.");
       const combined = AbortSignal.any([signal, lifetime.signal]);
       const cwd = await realpath(params.cwd);
+      const openedAt = performance.now();
       const { sessionId: attachmentId } = openedSchema.parse(
         await request({ action: "open", cwd }, combined),
       );
@@ -258,6 +285,7 @@ export function createBridge(
           approvalMode,
         ),
         cursor: 0,
+        lastPollAt: openedAt,
         controller: new AbortController(),
         turn: undefined,
       };
@@ -324,10 +352,8 @@ export function createBridge(
             );
         }
         const text = chunks.join("\n\n");
-        if (!text.trim() || text.length > 32_000)
-          throw bridgeError(
-            "Prompt plus context must contain 1–32,000 characters.",
-          );
+        if (!text.trim())
+          throw bridgeError("Prompt plus context must not be empty.");
         combined.throwIfAborted();
         turn.submitted = true;
         await request(
@@ -347,7 +373,8 @@ export function createBridge(
       } finally {
         signal.removeEventListener("abort", cancelled);
         controller.abort(new Error("Turn finished."));
-        if (turn.submitted && !turn.remoteDone) await cancel(attachment, turn);
+        if (!attachment.closing && turn.submitted && !turn.remoteDone)
+          await cancel(attachment, turn);
         try {
           await settle(attachment);
         } finally {
@@ -364,7 +391,11 @@ export function createBridge(
     app,
     close: async () => {
       lifetime.abort(new Error("Bridge closed."));
-      await Promise.all([...attachments.keys()].map(closeAttachment));
+      await Promise.all(
+        [...attachments.keys()].map((id) =>
+          closeAttachment(id, "bridge_shutdown"),
+        ),
+      );
     },
   };
 }

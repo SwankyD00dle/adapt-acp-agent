@@ -5,6 +5,12 @@ import type {
   AgentIntegration,
   ConnectionContext,
 } from "@adaptcom/core";
+import {
+  type DiagnosticLogger,
+  errorMetadata,
+  logDiagnostic,
+} from "../../diagnostics.ts";
+import { BridgeStateError } from "./errors.ts";
 import { type BridgeRequest, requestSchema } from "../../protocol.ts";
 import type { AcpAccess } from "../types.ts";
 
@@ -35,6 +41,7 @@ export const acpIntegration: AgentIntegration<{
 
 interface AcpChannelOptions {
   connection: AgentConnection<AcpAccess>;
+  log?: DiagnosticLogger;
   token: (context: ConnectionContext) => Promise<string>;
 }
 
@@ -49,6 +56,21 @@ export function createAcpChannel(options: AcpChannelOptions): AgentChannel {
     name: "acp",
     path: "/acp",
     async receive(request) {
+      const started = performance.now();
+      let input: BridgeRequest | undefined;
+      const reply = (body: unknown, status = 200, error?: unknown) => {
+        (options.log ?? logDiagnostic)("acp.bridge.request", {
+          action: input?.action,
+          sessionId:
+            input && "sessionId" in input ? input.sessionId : undefined,
+          promptId: input && "promptId" in input ? input.promptId : undefined,
+          callId: input && "callId" in input ? input.callId : undefined,
+          status,
+          durationMs: Math.round(performance.now() - started),
+          ...(error === undefined ? {} : errorMetadata(error)),
+        });
+        return json(body, status);
+      };
       request.signal.throwIfAborted();
       let token: string;
       try {
@@ -66,21 +88,22 @@ export function createAcpChannel(options: AcpChannelOptions): AgentChannel {
         received.length !== expected.length ||
         !timingSafeEqual(received, expected)
       )
-        return json({ error: "Unauthorized." }, 401);
-      if (request.method !== "POST") return json({ error: "Use POST." }, 405);
+        return reply({ error: "Unauthorized." }, 401);
+      if (request.method !== "POST") return reply({ error: "Use POST." }, 405);
       if (
         request.headers.get("content-type")?.split(";")[0] !==
         "application/json"
       )
-        return json({ error: "Use application/json." }, 400);
+        return reply({ error: "Use application/json." }, 400);
       const body = await request.text();
-      if (Buffer.byteLength(body) > 300_000)
-        return json({ error: "Request too large." }, 413);
-      let input: BridgeRequest;
       try {
         input = requestSchema.parse(JSON.parse(body));
-      } catch {
-        return json({ error: "Invalid bridge request." }, 400);
+      } catch (error) {
+        return reply(
+          { error: "Invalid bridge request.", code: "INVALID_REQUEST" },
+          400,
+          error,
+        );
       }
       try {
         const access = await options.connection.connect({
@@ -88,9 +111,9 @@ export function createAcpChannel(options: AcpChannelOptions): AgentChannel {
         });
         switch (input.action) {
           case "open":
-            return json({ sessionId: access.open(input.cwd).attachmentId });
+            return reply({ sessionId: access.open(input.cwd).attachmentId });
           case "poll":
-            return json(access.poll(input.sessionId, input.after));
+            return reply(access.poll(input.sessionId, input.after));
           case "prompt": {
             const accepted = access.prompt(
               input.sessionId,
@@ -105,7 +128,7 @@ export function createAcpChannel(options: AcpChannelOptions): AgentChannel {
                 })
               : undefined;
             return {
-              ...json({ accepted: true }, 202),
+              ...reply({ accepted: true }, 202),
               ...(trigger ? { trigger } : {}),
             };
           }
@@ -119,14 +142,16 @@ export function createAcpChannel(options: AcpChannelOptions): AgentChannel {
             access.close(input.sessionId);
             break;
         }
-        return json({ ok: true });
+        return reply({ ok: true });
       } catch (error) {
-        return json(
+        return reply(
           {
             error:
               error instanceof Error ? error.message : "Bridge request failed.",
+            ...(error instanceof BridgeStateError ? { code: error.code } : {}),
           },
           409,
+          error,
         );
       }
     },
