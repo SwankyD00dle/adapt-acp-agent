@@ -3,7 +3,7 @@ import { type ToolExecutionOptions, tool } from "ai";
 import { writeInputSchema } from "../../protocol.ts";
 import type { AcpAccess } from "../types.ts";
 
-export default function writeFile({ connections }: AgentProjectContext) {
+export default function ideWriteFile({ connections }: AgentProjectContext) {
   const connection = connections.get<AcpAccess>("acp");
   return tool({
     description:

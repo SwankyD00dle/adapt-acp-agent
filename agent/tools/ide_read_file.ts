@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readInputSchema, maxFileBytes } from "../../protocol.ts";
 import type { AcpAccess } from "../types.ts";
 
-export default function readFile({ connections }: AgentProjectContext) {
+export default function ideReadFile({ connections }: AgentProjectContext) {
   const connection = connections.get<AcpAccess>("acp");
   return tool({
     description: `Read a UTF-8 file. Relative paths start in the working directory. Files larger than ${maxFileBytes} bytes require reading portions with exec.`,

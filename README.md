@@ -1,9 +1,10 @@
 # ACP Code
 
-Connect ACP Patchbay in VS Code to a deployed veetwo coding agent. The agent runs
-remotely; file reads, reviewed edits, and approved commands run in the workspace
-where Patchbay launches the local client. No workspace checkout is uploaded and
-no command falls back to execution on the deployment host.
+Connect ACP Patchbay in VS Code to a deployed GitHub-backed coding and
+infrastructure-diagnostics agent. Each session gets a service-side workspace with
+GitHub-authenticated `gh` and `git` commands. The `ide_*` tools remain available
+for reviewed reads, edits, and commands in the workspace where Patchbay launches
+the local client.
 
 Everything, including the bridge, deployment configuration, tests, and client
 SDK dependency, lives in this example. This is an example-specific agent, not a
@@ -14,7 +15,7 @@ Patchbay in VS Code
   ↕ ACP v1 / stdio
 downloaded client.mjs on the workspace machine
   ↕ dedicated-header-authenticated HTTPS POST /acp + polling
-veetwo service → agent → editor-backed tools
+veetwo service → GitHub AI SDK harness → service workspace + read-only cloud tools
 ```
 
 ## 1. Install
@@ -26,7 +27,9 @@ pnpm install --frozen-lockfile
 cp examples/acp-code/.env.example examples/acp-code/.env
 ```
 
-The example declares `@adaptcom/core`, `@adaptcom/cli`, the ACP client SDK, and its build dependencies.
+The example declares `@adaptcom/core`, `@adaptcom/cli`, the ACP client SDK,
+the GitHub, GKE, and Google Cloud authentication clients, and its build
+dependencies.
 The workspace install builds and links the framework. To copy this example into
 another project, follow the [package setup instructions](../README.md#copying-an-example-into-your-own-project).
 Patchbay can run the standalone download with Node 24+ and no npm dependencies.
@@ -50,7 +53,8 @@ chmod 600 "$HOME/.config/adapt/acp-code.token"
 
 Export your Adapt credentials using your existing credential workflow:
 `PLATINUM_AUTH_TOKEN`, and optionally `PLATINUM_URL`. The token must be authorized
-for both deployment and model access. Export the dedicated client token too:
+for deployment, model access, and read-only Platinum diagnostics. Export the
+dedicated client token too:
 
 ```sh
 export ACP_TOKEN="$(cat "$HOME/.config/adapt/acp-code.token")"
@@ -63,12 +67,19 @@ Set in the project's `.env` or export in your shell:
 
 ```dotenv
 PLATINUM_MODEL=<a-model-route-available-to-your-account>
+GITHUB_TOKEN=<fine-grained-personal-token>
+GCP_SERVICE_ACCOUNT_JSON=<read-only-service-account-json>
+GCP_STAGING_PROJECT_ID=adapt-developer
+GCP_STAGING_CLUSTER=adapt-staging
+GCP_STAGING_CLUSTER_LOCATION=us-central1
+GCP_KUBERNETES_NAMESPACE=staging
 SANDBOX_TTL_SECONDS=0
 ```
 
-Also set `PLATINUM_AUTH_TOKEN`, `ACP_TOKEN`, and optional `PLATINUM_URL` there if
-they are not already exported. Keep `.env` out of Git. Both local serving and
-deployment use these environment variables; no vault setup is required.
+Also set `PLATINUM_AUTH_TOKEN`, `ACP_TOKEN`, `GITHUB_TOKEN`,
+`GCP_SERVICE_ACCOUNT_JSON`, and `GCP_STAGING_PROJECT_ID` there if they are not
+already exported. Keep `.env` out of Git. Both local serving and deployment use
+these environment variables; no vault setup is required.
 `adapt.deploy.ts` explicitly forwards both tokens to the worker environment,
 and `adapt.runtime.ts` resolves them from that environment. Treat deployment
 environment configuration as sensitive, and redeploy after changing either token.
@@ -325,9 +336,12 @@ there is no separate `ToolEnvironment` adapter.
   and routes live attachment operations without runtime-store access.
 - `agent/harness.ts` binds execution to the editor turn and forwards committed messages.
   Its `withTools` support preserves that wrapper when discovered tools are injected.
-- `agent/tools/read_file.ts`, `write_file.ts`, and `exec.ts` each export one
-  tool factory. They resolve the shared ACP connection through the registry
-  and send all workspace operations to the editor, never the deployment host.
+- `agent/tools/ide_read_file.ts`, `ide_write_file.ts`, and `ide_exec.ts` each
+  export one editor-backed tool factory. They resolve the shared ACP connection
+  through the registry. The native GitHub AI SDK harness owns `read_file`,
+  `write_file`, and `exec` for the service-side session workspace.
+- `agent/tools/platinum_get.ts`, `orc_vm_inspect.ts`, `gcp_pods.ts`,
+  `gcp_pod_logs.ts`, and `gcp_logs.ts` provide read-only staging diagnostics.
 - Opening an attachment uses the service host's lifetime signal (supplied as
   `request.signal` by veetwo's channel server). Harness/tool operation cancellation
   stops that work without detaching an otherwise healthy editor.
