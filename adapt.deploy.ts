@@ -17,9 +17,30 @@ export default defineDeployment({
         memoryMiB: Number(process.env.SANDBOX_MEMORY_MIB ?? 1024),
         ...(volume ? { volume } : {}),
         env: () => ({
-          PLATINUM_AUTH_TOKEN: required("PLATINUM_AUTH_TOKEN"),
           ACP_TOKEN: required("ACP_TOKEN"),
+          GITHUB_TOKEN: required("GITHUB_TOKEN"),
+          GCP_SERVICE_ACCOUNT_JSON: required("GCP_SERVICE_ACCOUNT_JSON"),
+          GCP_STAGING_PROJECT_ID: required("GCP_STAGING_PROJECT_ID"),
+          PLATINUM_AUTH_TOKEN: required("PLATINUM_AUTH_TOKEN"),
           PLATINUM_MODEL: required("PLATINUM_MODEL"),
+          ...(process.env.GCP_CLOUD_LOGGING_PROJECT_ID
+            ? {
+                GCP_CLOUD_LOGGING_PROJECT_ID:
+                  process.env.GCP_CLOUD_LOGGING_PROJECT_ID,
+              }
+            : {}),
+          ...(process.env.GCP_KUBERNETES_NAMESPACE
+            ? { GCP_KUBERNETES_NAMESPACE: process.env.GCP_KUBERNETES_NAMESPACE }
+            : {}),
+          ...(process.env.GCP_STAGING_CLUSTER
+            ? { GCP_STAGING_CLUSTER: process.env.GCP_STAGING_CLUSTER }
+            : {}),
+          ...(process.env.GCP_STAGING_CLUSTER_LOCATION
+            ? {
+                GCP_STAGING_CLUSTER_LOCATION:
+                  process.env.GCP_STAGING_CLUSTER_LOCATION,
+              }
+            : {}),
           ...(process.env.PLATINUM_URL
             ? { PLATINUM_URL: process.env.PLATINUM_URL }
             : {}),

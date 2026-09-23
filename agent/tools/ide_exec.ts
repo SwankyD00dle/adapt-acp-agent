@@ -7,7 +7,7 @@ import {
 } from "../../protocol.ts";
 import type { AcpAccess } from "../types.ts";
 
-export default function exec({ connections }: AgentProjectContext) {
+export default function ideExec({ connections }: AgentProjectContext) {
   const connection = connections.get<AcpAccess>("acp");
   return tool({
     description:
