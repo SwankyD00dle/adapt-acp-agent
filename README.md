@@ -28,8 +28,7 @@ cp examples/acp-code/.env.example examples/acp-code/.env
 ```
 
 The example declares `@adaptcom/core`, `@adaptcom/cli`, the ACP client SDK,
-the GitHub, GKE, and Google Cloud authentication clients, and its build
-dependencies.
+and its build dependencies.
 The workspace install builds and links the framework. To copy this example into
 another project, follow the [package setup instructions](../README.md#copying-an-example-into-your-own-project).
 Patchbay can run the standalone download with Node 24+ and no npm dependencies.
@@ -68,17 +67,11 @@ Set in the project's `.env` or export in your shell:
 ```dotenv
 PLATINUM_MODEL=<a-model-route-available-to-your-account>
 GITHUB_TOKEN=<fine-grained-personal-token>
-GCP_SERVICE_ACCOUNT_JSON=<read-only-service-account-json>
-GCP_STAGING_PROJECT_ID=adapt-developer
-GCP_STAGING_CLUSTER=adapt-staging
-GCP_STAGING_CLUSTER_LOCATION=us-central1
-GCP_KUBERNETES_NAMESPACE=staging
 SANDBOX_TTL_SECONDS=0
 ```
 
-Also set `PLATINUM_AUTH_TOKEN`, `ACP_TOKEN`, `GITHUB_TOKEN`,
-`GCP_SERVICE_ACCOUNT_JSON`, and `GCP_STAGING_PROJECT_ID` there if they are not
-already exported. Keep `.env` out of Git. Both local serving and deployment use
+Also set `PLATINUM_AUTH_TOKEN`, `ACP_TOKEN`, and `GITHUB_TOKEN` there if they
+are not already exported. Keep `.env` out of Git. Both local serving and deployment use
 these environment variables; no vault setup is required.
 `adapt.deploy.ts` explicitly forwards both tokens to the worker environment,
 and `adapt.runtime.ts` resolves them from that environment. Treat deployment
@@ -340,8 +333,8 @@ there is no separate `ToolEnvironment` adapter.
   export one editor-backed tool factory. They resolve the shared ACP connection
   through the registry. The native GitHub AI SDK harness owns `read_file`,
   `write_file`, and `exec` for the service-side session workspace.
-- `agent/tools/platinum_get.ts`, `orc_vm_inspect.ts`, `gcp_pods.ts`,
-  `gcp_pod_logs.ts`, and `gcp_logs.ts` provide read-only staging diagnostics.
+- `agent/tools/platinum_get.ts` and `orc_vm_inspect.ts` provide read-only
+  staging diagnostics.
 - Opening an attachment uses the service host's lifetime signal (supplied as
   `request.signal` by veetwo's channel server). Harness/tool operation cancellation
   stops that work without detaching an otherwise healthy editor.

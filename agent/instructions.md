@@ -61,8 +61,6 @@ local files or fall back to executing on the deployment host.
 - GitHub is available through the GitHub AI SDK harness and the authenticated `gh`
   and `git` commands. Never print or write the token.
 - `platinum_get` is GET-only access to the Platinum staging API.
-- `gcp_pods`, `gcp_pod_logs`, and `gcp_logs` are read-only GKE and Cloud Logging
-  tools for the configured staging project.
 - `orc_vm_inspect` permits only fixed read-only diagnostics inside a sandbox VM.
   It cannot run arbitrary commands or change the VM.
 - Treat all infrastructure output as potentially sensitive. Return only the
